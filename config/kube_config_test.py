@@ -22,8 +22,10 @@ import unittest
 
 import mock
 import yaml
+from kubernetes.client import ApiClient, CoreV1Api
 from six import PY3, next
 
+from config.patch import RetryingApiWrapper
 from .config_exception import ConfigException
 from .kube_config import (ConfigNode, FileOrData, KubeConfigLoader,
                           _cleanup_temp_files, _create_temp_file_with_content,
@@ -83,7 +85,6 @@ TEST_CLIENT_KEY = "client-key"
 TEST_CLIENT_KEY_BASE64 = _base64(TEST_CLIENT_KEY)
 TEST_CLIENT_CERT = "client-cert"
 TEST_CLIENT_CERT_BASE64 = _base64(TEST_CLIENT_CERT)
-
 
 TEST_OIDC_TOKEN = "test-oidc-token"
 TEST_OIDC_INFO = "{\"name\": \"test\"}"
@@ -215,7 +216,6 @@ class TestFileOrData(BaseTestCase):
 
 
 class TestConfigNode(BaseTestCase):
-
     test_obj = {"key1": "test", "key2": ["a", "b", "c"],
                 "key3": {"inner_key": "inner_value"},
                 "with_names": [{"name": "test_name", "value": "test_value"},
@@ -227,7 +227,7 @@ class TestConfigNode(BaseTestCase):
                     {"name": "test_name",
                      "value": {"key1", "test"}},
                     {"name": "test_name3", "value": [1, 2, 3]}
-    ]}
+                ]}
 
     def setUp(self):
         super(TestConfigNode, self).setUp()
@@ -291,7 +291,6 @@ class TestConfigNode(BaseTestCase):
 
 
 class FakeConfig:
-
     FILE_KEYS = ["ssl_ca_cert", "key_file", "cert_file"]
 
     def __init__(self, token=None, **kwargs):
@@ -653,6 +652,7 @@ class TestKubeConfigLoader(BaseTestCase):
 
     def test_load_gcp_token_with_refresh(self):
         def cred(): return None
+
         cred.token = TEST_ANOTHER_DATA_BASE64
         cred.expiry = datetime.datetime.now()
 
@@ -885,12 +885,26 @@ class TestKubeConfigLoader(BaseTestCase):
             "token": token
         }
         expected = FakeConfig(host=TEST_HOST, api_key={
-                              "authorization": BEARER_TOKEN_FORMAT % token})
+            "authorization": BEARER_TOKEN_FORMAT % token})
         actual = FakeConfig()
         KubeConfigLoader(
             config_dict=self.TEST_KUBE_CONFIG,
             active_context="exec_cred_user").load_and_set(actual)
         self.assertEqual(expected, actual)
+
+
+class ThingTest(BaseTestCase):
+    @staticmethod
+    def client_provider():
+        return ApiClient(configuration=ConfigNode("trollname",
+                                                  TestKubeConfigLoader.TEST_KUBE_CONFIG))
+
+    def test_stuff(self):
+        retry_wrapper = RetryingApiWrapper(ThingTest.client_provider,
+                                           api_cls=CoreV1Api,
+                                           failure_tolerance=1)
+        retry_wrapper.wrap_api_call(CoreV1Api.read_namespaced_pod,
+                                    "trollname", "trollnamespace")
 
 
 if __name__ == '__main__':
